@@ -9,7 +9,7 @@
   @media (prefers-color-scheme: dark) { :root { --bg:#151a21; --card:#1e2530; --tx:#e6eaf0; --mu:#93a0b4; --bd:#303a49; --ac:#6aa3ff; --ok:#4cc38a; --warn:#f0a04b; --err:#ff8a80; } }
   * { box-sizing:border-box; }
   body { margin:0; font:15px/1.45 system-ui,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--tx); }
-  main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
+  main { max-width:1400px; margin:0 auto; padding:20px 16px 40px; }
   h1 { font-size:20px; margin:0 0 14px; }
   .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; margin-bottom:14px; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
@@ -25,7 +25,7 @@
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th, td { padding:7px 9px; border-bottom:1px solid var(--bd); text-align:left; white-space:nowrap; }
   th { color:var(--mu); font-weight:600; font-size:12px; }
-  .late { color:var(--warn); font-weight:600; } .okc { color:var(--ok); }
+  .late { color:var(--warn); font-weight:600; } .okc { color:var(--ok); } .extra { color:var(--mu); }
   .sum { color:var(--mu); font-size:13px; margin:0 0 8px; }
 </style>
 </head>
@@ -73,7 +73,7 @@
     <p class="sum" id="sum"></p>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>№</th><th>Огноо</th><th>Багшийн код</th><th>Пар</th><th>Хичээл эхлэх</th><th>Уншуулсан цаг</th><th>Бүртгэсэн цаг</th><th>Төлөв</th></tr></thead>
+        <thead><tr><th>№</th><th>Огноо</th><th>Багшийн код</th><th>Пар</th><th>Хуваарь</th><th>Эхэлсэн (уншуулсан)</th><th>Эхэлсэн (бүртгэсэн)</th><th>Эхлэх төлөв</th><th>Тарсан (уншуулсан)</th><th>Тарсан (бүртгэсэн)</th><th>Дуусах төлөв</th><th>Үргэлжилсэн (мин)</th></tr></thead>
         <tbody id="tb"></tbody>
       </table>
     </div>
@@ -102,32 +102,61 @@ const dStr = e => { const d = new Date(e*1000); return `${d.getUTCFullYear()}-${
 const tStr = (e, sec) => { const d = new Date(e*1000); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` + (sec ? `:${pad(d.getUTCSeconds())}` : ''); };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-function rowOf(x) {
-  const startE = x.p ? Math.floor(x.a/86400)*86400 + PSTART[x.p]*60 : null;
-  let status = 'Нэмэлт (хичээлийн бус цаг)', late = '';
-  if (x.p) {
-    if (x.c === startE) status = 'Цагтаа';
-    else { const m = Math.floor((x.a - startE)/60); status = `Хоцорсон (${m} мин)`; late = m; }
+// Эхлэх, дуусах уншилтыг (өдөр, код, пар) -р нэг мөр болгон нэгтгэнэ
+function lessons() {
+  const map = {}, out = [];
+  Object.values(arch).forEach(x => {
+    const day = Math.floor(x.a / 86400);
+    if (!x.p) { out.push({ day, id:x.id, p:0, s:x, e:null, sort:x.a }); return; }   // Нэмэлт
+    const k = day + '|' + x.id + '|' + x.p;
+    const l = map[k] || (map[k] = { day, id:x.id, p:x.p, s:null, e:null, sort:x.a });
+    if (x.t === 1) l.e = x; else l.s = x;
+    if (x.a < l.sort) l.sort = x.a;
+  });
+  return out.concat(Object.values(map)).sort((a, b) => a.sort - b.sort);
+}
+
+function rowOf(l) {
+  const nowE = Math.floor(Date.now()/1000) + 8*3600;
+  const dayStart = l.day * 86400;
+  const r = { date: dStr(dayStart), id: l.id, p: l.p || 'Нэмэлт', sched:'—',
+              sAct:'—', sCnt:'—', sStat:'—', eAct:'—', eCnt:'—', eStat:'—', dur:'', cls:'okc', late:false, early:false, open:false, noStart:false };
+  if (!l.p) {
+    r.sAct = tStr(l.s.a, true); r.sCnt = tStr(l.s.c, true); r.sStat = 'Нэмэлт (хичээлийн бус цаг)'; r.cls = 'extra';
+    return r;
   }
-  return { date:dStr(x.a), id:x.id, p:x.p || 'Нэмэлт', start:startE ? tStr(startE) : '—', actual:tStr(x.a,true), counted:tStr(x.c, x.c !== startE), status, late, isLate: status.startsWith('Хоцорсон') };
+  const st = dayStart + PSTART[l.p]*60, en = st + 90*60;
+  r.sched = `${tStr(st)}–${tStr(en)}`;
+  if (l.s) {
+    r.sAct = tStr(l.s.a, true); r.sCnt = tStr(l.s.c, l.s.c !== st);
+    if (l.s.c === st) r.sStat = 'Цагтаа';
+    else { const m = Math.floor((l.s.a - st)/60); r.sStat = `Хоцорсон (${m} мин)`; r.late = true; }
+  } else { r.sStat = 'Эхлэх уншилтгүй'; r.noStart = true; }
+  if (l.e) {
+    r.eAct = tStr(l.e.a, true); r.eCnt = tStr(l.e.c, l.e.c !== en);
+    if (l.e.c === en) r.eStat = 'Цагтаа';
+    else if (l.e.a < en) { r.eStat = `Эрт тарсан (${Math.floor((en - l.e.a)/60)} мин)`; r.early = true; }
+    else { r.eStat = `Хоцорч тарсан (${Math.floor((l.e.a - en)/60)} мин)`; r.early = true; }
+    if (l.s) r.dur = Math.round((l.e.c - l.s.c)/60);
+  } else if (nowE >= en + 11*60) { r.eStat = 'Дуусах уншилтгүй'; r.open = true; }
+  else if (l.s) r.eStat = 'Үргэлжилж байна';
+  r.cls = (r.late || r.early || r.open || r.noStart) ? 'late' : 'okc';
+  return r;
 }
 
 function filtered() {
   const f = $('from').value, t = $('to').value, q = $('q').value.trim().toUpperCase();
-  return Object.values(arch)
-    .filter(x => (!f || dStr(x.a) >= f) && (!t || dStr(x.a) <= t) && (!q || x.id.includes(q)))
-    .sort((a,b) => a.a - b.a);
+  return lessons().filter(l => { const d = dStr(l.day * 86400); return (!f || d >= f) && (!t || d <= t) && (!q || l.id.includes(q)); });
 }
 
 function render() {
-  const list = filtered();
-  $('tb').innerHTML = list.map((x,i) => {
-    const r = rowOf(x);
-    return `<tr><td>${i+1}</td><td>${r.date}</td><td><b>${esc(r.id)}</b></td><td>${r.p}</td><td>${r.start}</td><td>${r.actual}</td><td>${r.counted}</td><td class="${r.isLate?'late':'okc'}">${esc(r.status)}</td></tr>`;
-  }).join('');
-  const late = list.filter(x => rowOf(x).isLate).length;
-  const extra = list.filter(x => !x.p).length;
-  $('sum').textContent = `Нийт ${list.length} бүртгэл · хоцорсон ${late} · нэмэлт ${extra}`;
+  const list = filtered().map(rowOf);
+  $('tb').innerHTML = list.map((r,i) =>
+    `<tr><td>${i+1}</td><td>${r.date}</td><td><b>${esc(r.id)}</b></td><td>${r.p}</td><td>${r.sched}</td>` +
+    `<td>${r.sAct}</td><td>${r.sCnt}</td><td class="${r.late||r.noStart?'late':(r.cls==='extra'?'extra':'okc')}">${esc(r.sStat)}</td>` +
+    `<td>${r.eAct}</td><td>${r.eCnt}</td><td class="${r.early||r.open?'late':'okc'}">${esc(r.eStat)}</td><td>${r.dur === '' ? '—' : r.dur}</td></tr>`).join('');
+  const n = f => list.filter(f).length;
+  $('sum').textContent = `Нийт ${list.length} мөр · хоцорч эхэлсэн ${n(r => r.late)} · эрт/хоцорч тарсан ${n(r => r.early)} · дуусах уншилтгүй ${n(r => r.open)} · нэмэлт ${n(r => r.cls === 'extra')}`;
   setSt('st-arch', 'on', `${Object.keys(arch).length} бүртгэл`);
 }
 
@@ -151,7 +180,7 @@ async function poll() {
     let added = 0;
     for (const x of d.records) {
       const k = x.id + '|' + x.a;
-      if (!arch[k]) { arch[k] = { id:x.id, p:x.p, a:x.a, c:x.c }; added++; }
+      if (!arch[k]) { arch[k] = { id:x.id, p:x.p, a:x.a, c:x.c, t:x.t === 1 ? 1 : 0 }; added++; }
     }
     since = d.next;
     if (added) saveArch();
@@ -201,7 +230,7 @@ async function pullSheet() {
     let added = 0;
     for (const x of d.records) {
       const k = x.id + '|' + x.a;
-      if (!arch[k]) { arch[k] = { id:String(x.id), p:Number(x.p) || 0, a:Number(x.a), c:Number(x.c) }; added++; }
+      if (!arch[k]) { arch[k] = { id:String(x.id), p:Number(x.p) || 0, a:Number(x.a), c:Number(x.c), t:Number(x.t) === 1 ? 1 : 0 }; added++; }
       if (x.a > sheetAfter) sheetAfter = x.a;
     }
     if (added) saveArch();
@@ -219,9 +248,9 @@ $('sload').onclick = () => {
 };
 
 // ---------- Экспорт ----------
-const HEAD = ['№','Огноо','Багшийн код','Пар','Хичээл эхлэх цаг','Уншуулсан цаг','Бүртгэсэн цаг','Төлөв','Хоцролт (мин)'];
+const HEAD = ['№','Огноо','Багшийн код','Пар','Хуваарь','Эхэлсэн (уншуулсан)','Эхэлсэн (бүртгэсэн)','Эхлэх төлөв','Тарсан (уншуулсан)','Тарсан (бүртгэсэн)','Дуусах төлөв','Үргэлжилсэн (мин)'];
 function tableRows() {
-  return filtered().map((x,i) => { const r = rowOf(x); return [i+1, r.date, r.id, r.p, r.start, r.actual, r.counted, r.status, r.late]; });
+  return filtered().map(rowOf).map((r,i) => [i+1, r.date, r.id, r.p, r.sched, r.sAct, r.sCnt, r.sStat, r.eAct, r.eCnt, r.eStat, r.dur]);
 }
 function download(name, mime, content) {
   const a = document.createElement('a');
